@@ -1,0 +1,399 @@
+import os
+import argparse
+import numpy as np
+import time
+import logging
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+from typing import *
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset
+from torch.utils.tensorboard import SummaryWriter
+from torchsummary import summary
+
+from utils.dataset import load_dataloader
+from utils.callback import CheckPoint, EarlyStopping
+from utils.scheduler import PolynomialLRDecay, CosineWarmupLR
+from utils.plots import plot_loss_graphs
+
+
+logger = logging.getLogger('The logs of model training')
+logger.setLevel(logging.INFO)
+stream_handler = logging.StreamHandler()
+logger.addHandler(stream_handler)
+
+
+def train_on_batch(
+    model,
+    train_loader,
+    device,
+    optimizer,
+    loss_func,
+    log_step,
+):
+    model.train()
+    batch_loss, batch_acc = 0, 0
+
+    for batch, (images, labels) in enumerate(train_loader):
+        images = images.to(device)
+        labels = labels.to(device)
+        
+        optimizer.zero_grad()
+
+        outputs = model(images)
+        loss = loss_func(outputs, labels)
+        output_index = torch.argmax(outputs, dim=1)
+        acc = (output_index == labels).sum() / len(outputs)
+        
+        loss.backward()
+        optimizer.step()
+
+        if log_step > 0:
+            if (batch + 1) / log_step == 0:
+                logger(f'\n[Batch {batch+1}/{len(train_loader)}]'
+                       f'  train loss: {loss:.3f}  accuracy: {acc:.3f}')
+        
+        batch_loss += loss.item()
+        batch_acc += acc.item()
+
+    return model, batch_loss/(batch+1), batch_acc/(batch+1)
+
+
+@torch.no_grad()
+def valid_on_batch(
+    model,
+    valid_loader,
+    loss_func,
+    device,
+    log_step,
+):
+    model.eval()
+    batch_loss, batch_acc = 0, 0
+    for batch, (images, labels) in enumerate(valid_loader):
+        images = images.to(device)
+        labels = labels.to(device)
+
+        outputs = model(images)
+        loss = loss_func(outputs, labels)
+        output_index = torch.argmax(outputs, dim=1)
+        acc = (output_index == labels).sum() / len(outputs)
+
+        if log_step > 0:
+            if (batch + 1) / log_step == 0:
+                logger(f'\n[Batch {batch+1}/{len(valid_loader)}]'
+                       f'  valid loss: {loss:.3f}  accuracy: {acc:.3f}')
+
+        batch_loss += loss.item()
+        batch_acc += acc.item()
+
+    return model, batch_loss/(batch+1), batch_acc/(batch+1)
+
+
+def training(
+    model,
+    train_loader,
+    valid_loader,
+    lr: float=0.001,
+    weight_decay: float=5e-4,
+    epochs: int=100,
+    momentum: Optional[float]=0.9,
+    optimizer_name: str='momentum',
+    lr_scheduling: bool=True,
+    lr_scheduler_name: str='poly',
+    check_point: bool=True,
+    early_stop: bool=False,
+    project_name: str='experiment1',
+    class_weight: Optional[torch.Tensor]=None,
+    train_log_step: int=0,
+    valid_log_step: int=0,
+    es_patience: int=30,
+    quantization: bool=False, # quantization aware training
+):
+    # settings for training
+    assert optimizer_name in ('momentum', 'adam', 'adamw', 'nadam', 'radam'), \
+        f'{optimizer_name} does not exists.'
+
+    # quantization
+    if quantization:
+        from .quantization.quantize import prepare_qat, fuse_modules
+
+        project_name += '_qat'
+        model = fuse_modules(model, mode='train')
+        model = prepare_qat(model)
+
+    # callbacks
+    os.makedirs(f'./runs/train/{project_name}/weights', exist_ok=True)
+    cp = CheckPoint(verbose=True)
+
+    es_path = f'./runs/train/{project_name}/weights/es_weight.pt'
+    es = EarlyStopping(verbose=True, patience=es_patience, path=es_path)
+
+    # device and model
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logger.info(f'device is {device}')
+    
+    model = model.to(device)
+    logger.info('model loading ready.')
+
+    # loss function
+    loss_func = nn.CrossEntropyLoss(weight=class_weight)
+
+    # optimizer
+    if optimizer_name == 'momentum':
+        optimizer = optim.SGD(
+            model.parameters(),
+            momentum=momentum,
+            lr=lr,
+            weight_decay=weight_decay,
+        )
+
+    else:
+        if optimizer_name == 'adam':
+            opt = optim.Adam
+        elif optimizer_name == 'adamw':
+            opt = optim.AdamW
+        elif optimizer_name == 'radam':
+            opt = optim.RAdam
+        else:
+            opt = optim.NAdam
+
+        if type(momentum) is float:
+            betas = (momentum, 0.999)
+        else:
+            betas = (0.9, 0.999)
+
+        optimizer = opt(
+            model.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+            betas=betas,
+        )
+    
+    logger.info(f'optimizer {optimizer} ready.')
+    
+    # schedulers
+    if lr_scheduler_name == 'poly':
+        lr_scheduler = PolynomialLRDecay(
+            optimizer=optimizer,
+            max_decay_steps=epochs,
+        )
+    else:
+        lr_scheduler = CosineWarmupLR(
+            optimizer=optimizer,
+            epochs=epochs,
+            warmup_epochs=int(epochs*0.1),
+        )
+
+    # tensorboard
+    writer = SummaryWriter(log_dir=f'./runs/train/{project_name}')
+
+    loss_list, acc_list = [], []
+    val_loss_list, val_acc_list = [], []
+    start_training = time.time()    
+    pbar = tqdm(range(epochs), total=int(epochs))
+
+    for epoch in pbar:
+        epoch_time = time.time()
+
+        ##################### training #####################
+        model, train_loss, train_acc = train_on_batch(
+            model=model,
+            train_loader=train_loader,
+            device=device,
+            optimizer=optimizer,
+            loss_func=loss_func,
+            log_step=train_log_step,
+        )
+        loss_list.append(train_loss)
+        acc_list.append(train_acc)
+        ####################################################
+
+        #################### validating ####################
+        model, valid_loss, valid_acc = valid_on_batch(
+            model=model,
+            valid_loader=valid_loader,
+            loss_func=loss_func,
+            device=device,
+            log_step=valid_log_step,
+        )
+        val_loss_list.append(valid_loss)
+        val_acc_list.append(valid_acc)
+        ####################################################
+
+        logger.info(f'\n{"="*30} Epoch {epoch+1}/{epochs} {"="*30}'
+                    f'\ntime: {(time.time() - epoch_time):.2f}s'
+                    f'   lr = {optimizer.param_groups[0]["lr"]}')
+        logger.info(f'\ntrain average loss: {train_loss:.3f}'
+                    f'  accuracy: {train_acc:.3f}')
+        logger.info(f'\nvalid average loss: {valid_loss:.3f}'
+                    f'  accuracy: {valid_acc:.3f}')
+        logger.info(f'\n{"="*80}')
+
+        writer.add_scalar('lr', optimizer.param_groups[0]["lr"], epoch)
+        writer.add_scalar('train/loss', train_loss, epoch)
+        writer.add_scalar('train/accuracy', train_acc, epoch)
+        writer.add_scalar('valid/loss', valid_loss, epoch)
+        writer.add_scalar('valid/accuracy', valid_acc, epoch)
+
+        if lr_scheduling:
+            lr_scheduler.step()
+
+        if check_point:
+            path = './runs/train/{}/weights/check_point_{:03d}.pt'.format(project_name, epoch)
+            cp(valid_loss, model, path)
+
+        if early_stop:
+            es(valid_loss, model)    
+            if es.early_stop:
+                print('\n##########################\n'
+                      '##### Early Stopping #####\n'
+                      '##########################')
+                break
+            
+    logger.info(f'\nTotal training time is {time.time() - start_training:.2f}s')
+    
+    return {
+        'model': model,
+        'loss': loss_list,
+        'acc': acc_list,
+        'val_loss': val_loss_list,
+        'val_acc': val_acc_list,
+    }
+
+
+def get_args_parser():
+    parser = argparse.ArgumentParser(description='Training Model', add_help=False)
+    
+    # dataset parameters
+    parser.add_argument('--data_path', type=str, required=True,
+                        help='data directory for training')
+    parser.add_argument('--normalization', action='store_true',
+                        help='data normalization for training')
+    parser.add_argument('--img_size', type=int, default=224,
+                        help='image resize size before applying cropping')
+    
+    # parameter for experiment
+    parser.add_argument('--name', type=str, default='experiment1',
+                        help='create a new folder')
+    
+    # model parameters
+    parser.add_argument('--model', type=str, default='shufflenet',
+                        choices=['shufflenet', 'resnet18', 'resnet50'],
+                        help='classification model name')
+    parser.add_argument('--pretrained', action='store_true',
+                        help='load pretrained model')
+    
+    # quantization
+    parser.add_argument('--quantization', action='store_true',
+                        help='model quantization')
+    
+    # hyperparameters for training
+    parser.add_argument('--num_workers', default=8, type=int,
+                        help='number of workers in cpu')
+    parser.add_argument('--batch_size', default=8, type=int,
+                        help='batch size for training model')
+    parser.add_argument('--lr', default=1e-2, type=float,
+                        help='learning rate')
+    parser.add_argument('--weight_decay', default=5e-4, type=float,
+                        help='weight decay of optimizer SGD and Adam')
+    parser.add_argument('--epochs', default=100, type=int,
+                        help='Epochs for training model')
+    parser.add_argument('--momentum', default=0.9, type=float,
+                        help='momentum constant for SGD momentum and Adam (beta1)')
+    parser.add_argument('--optimizer', default='momentum', type=str,
+                        help='set optimizer (sgd momentum and adam)')
+    parser.add_argument('--num_classes', default=33, type=int,
+                        help='class number of dataset')
+    parser.add_argument('--lr_scheduling', action='store_true',
+                        help='apply learning rate scheduler')
+    parser.add_argument('--lr_scheduler_name', default='poly', type=str,
+                        help='learning rate scheduler')
+    parser.add_argument('--check_point', action='store_true',
+                        help='save weight file when achieve the best score in validation phase')
+    parser.add_argument('--early_stop', action='store_true',
+                        help='set early stopping if loss of valid is increased')
+    parser.add_argument('--es_patience', default=20, type=int,
+                        help='patience to stop training by early stopping')
+    parser.add_argument('--train_log_step', type=int, default=40,
+                        help='print log of iteration in training loop')
+    parser.add_argument('--valid_log_step', type=int, default=10,
+                        help='print log of iteration in validating loop')
+    
+    return parser
+
+
+def main(args):
+
+    train_loader = load_dataloader(
+        path=args.data_path,
+        normalization=args.normalization,
+        img_size=args.img_size,
+        subset='train',
+        num_workers=args.num_workers,
+        batch_size=args.batch_size,
+    )
+
+    valid_loader = load_dataloader(
+        path=args.data_path,
+        normalization=args.normalization,
+        img_size=args.img_size,
+        subset='valid',
+        num_workers=args.num_workers,
+        batch_size=args.batch_size,
+    )
+
+    # quantization: only shufflenet and resnet    
+    q = True if args.quantization else False
+
+    if args.model == 'shufflenet':
+        from models.shufflenet import ShuffleNetV2
+        model = ShuffleNetV2(num_classes=args.num_classes, pre_trained=args.pretrained, quantize=q)
+        logger.info('model : ShuffleNet!')
+
+    elif args.model == 'resnet18':
+        from models.resnet import resnet18
+        model = resnet18(num_classes=args.num_classes, pre_trained=args.pretrained, quantize=q)
+        logger.info('model : ResNet18!')
+
+    elif args.model == 'resnet50':
+        from models.resnet import resnet50
+        model = resnet50(num_classes=args.num_classes, pre_trained=args.pretrained, quantize=q)
+        logger.info('model : ResNet50!')
+
+    else:
+        raise ValueError(f'{args.model} does not exists')
+
+    summary(model, (3, args.img_size, args.img_size), device='cpu')
+
+    history = training(
+        model=model,
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        epochs=args.epochs,
+        momentum=args.momentum,
+        optimizer_name=args.optimizer,
+        lr_scheduling=args.lr_scheduling,
+        lr_scheduler_name=args.lr_scheduler_name,
+        check_point=args.check_point,
+        early_stop=args.early_stop,
+        project_name=args.name,
+        train_log_step=args.train_log_step,
+        valid_log_step=args.valid_log_step,
+        es_patience=args.es_patience,
+        quantization=args.quantization,
+    )
+
+    prj_name = args.name + '_qat' if q else args.name
+    plot_loss_graphs(history, project_name=prj_name)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser('Model training', parents=[get_args_parser()])
+    args = parser.parse_args()
+    main(args)
