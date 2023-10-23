@@ -1,4 +1,4 @@
-## Building a Deep Learning Model to classify and recommend alcohols and it snacks  
+## Building a Deep Learning Model to classify and recommend alcohols and its snacks  
 
 ### Overview
 
