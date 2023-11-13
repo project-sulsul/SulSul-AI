@@ -3,13 +3,14 @@ import argparse
 import time
 from tqdm.auto import tqdm
 from typing import *
+from sklearn.metrics import confusion_matrix, classification_report
 
 import torch
 import torch.nn as nn
 
 from utils.dataset import load_dataloader
-from .utils.plots import plot_results
-from .quantization.quantize import (
+from utils.plots import plot_results
+from quantization.quantize import (
     converting_quantization, 
     ptq_serving, 
     qat_serving, 
@@ -17,18 +18,29 @@ from .quantization.quantize import (
     print_size_of_model,
 )
 
-"""
-alcohol_classes = {
-    0: '소주', 1: '맥주', 2: '양주', 3: '와인', 4: '막걸리'
+
+classes = {
+    0: '소고기', 1: '맥주', 2: '치킨', 3: '닭발', 4: '닭갈비',
+    5: '마른안주', 6: '두부김치', 7: '황도', 8: '계란말이', 9: '어묵탕',
+    10: '감자튀김', 11: '곱창', 12: '하이볼', 13: '화채', 14: '짬뽕',
+    15: '짜파게티', 16: '라면', 17: '양꼬치', 18: '나초', 19: '나가사키 짬뽕',
+    20: '피자', 21: '삼겹살', 22: '족발', 23: '육회', 24: '연어',
+    25: '회', 26: '새우튀김', 27: '소주',
 }
 
-snacks_classes = {
-    0: '치킨', 1: '피자', 2: '족발', 3: '보쌈', 4: '파전'
-}
-"""
-
-
-count_classes = {k: [0, 0] for k, v in classes.items()}
+# score function
+def score_fn(label, pred):
+    # print confusion matrix
+    print('### confusion matrix ###\n')
+    print(confusion_matrix(label, pred))
+    # print each score
+    each_score = classification_report(
+        label,
+        pred,
+        target_names=list(classes.values()),
+    )
+    print('\n\n### each score ###\n')
+    print(each_score)
 
 
 def test(
@@ -41,8 +53,7 @@ def test(
     if (project_name is None) and (not plot_result):
         raise ValueError('define project name')
 
-    if plot_result:
-        image_list, label_list, output_list = [], [], []
+    image_list, label_list, output_list = [], [], []
     
     start = time.time()
 
@@ -51,9 +62,8 @@ def test(
     batch_acc = 0
     with torch.no_grad():
         for batch, (images, labels) in tqdm(enumerate(test_loader), total=len(test_loader)):
-            if plot_result:
-                image_list.append(images)
-                label_list.append(labels)
+            image_list.append(images)
+            label_list.append(labels)
 
             images = images.to(device)
             labels = labels.to(device)
@@ -61,28 +71,18 @@ def test(
             outputs = model(images)
             output_index = torch.argmax(outputs, dim=1)
 
-            # calculate the accuracy for each class
-            for idx, output in enumerate(output_index):
-                count_classes[labels[idx].item()][1] += 1 # count label classes
-                if labels[idx] == output:
-                    count_classes[output.item()][0] += 1 # count predicted classes
-                
-            if plot_result:
-                output_list.append(output_index.cpu())
+            output_list.append(output_index.cpu())
 
             acc = (output_index == labels).sum() / len(outputs)
             batch_acc += acc.item()
     
     print(f'{"="*20} Inference Time: {time.time()-start:.3f}s {"="*20}')    
     
-    if project_name is not None:
-        if plot_result:
-            plot_results(image_list, label_list, output_list, project_name)
+    if project_name is not None and plot_result:
+        plot_results(image_list, label_list, output_list, project_name)
     
     print(f'{"="*20} Test Average Accuracy {batch_acc/(batch+1)*100:.2f} {"="*20}')
-    for k, v in count_classes.items():
-        print('{0: ^15s} --> accuracy: {1:.3f}%, {2}/{3}'.format(
-            classes[k], (v[1]+1e-7)/v[0], v[1], v[0]))
+
 
 
 def get_args_parser():
@@ -101,7 +101,7 @@ def get_args_parser():
                         help='number of workers in cpu')
     parser.add_argument('--batch_size', default=32, type=int,
                         help='batch Size for training model')
-    parser.add_argument('--num_classes', type=int, default=33,
+    parser.add_argument('--num_classes', type=int, default=28,
                         help='class number of dataset')
     parser.add_argument('--project_name', type=str, default='prj',
                         help='create new folder named project name')
