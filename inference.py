@@ -11,15 +11,14 @@ from utils.dataset import Padding
 from quantization.quantize import ptq_serving, qat_serving
 
 
-"""
-alcohol_classes = {
-    0: '소주', 1: '맥주', 2: '양주', 3: '와인', 4: '막걸리'
+classes = {
+    0: '소고기', 1: '맥주', 2: '치킨', 3: '닭발', 4: '닭갈비',
+    5: '마른안주', 6: '두부김치', 7: '황도', 8: '계란말이', 9: '어묵탕',
+    10: '감자튀김', 11: '곱창', 12: '하이볼', 13: '화채', 14: '짬뽕',
+    15: '짜파게티', 16: '라면', 17: '양꼬치', 18: '나초', 19: '나가사키 짬뽕',
+    20: '피자', 21: '삼겹살', 22: '족발', 23: '육회', 24: '연어',
+    25: '회', 26: '새우튀김', 27: '소주',
 }
-
-snacks_classes = {
-    0: '치킨', 1: '피자', 2: '족발', 3: '보쌈', 4: '파전'
-}
-"""
 
 
 transformation = transforms.Compose([
@@ -48,16 +47,16 @@ def inference(src: torch.Tensor, model: nn.Module):
 def get_args_parser():
     parser = argparse.ArgumentParser(description='Inference', add_help=False)
     parser.add_argument('--model_name', type=str, required=True,
+                        choices=['shufflenet', 'resnet18', 'resnet50'],
                         help='model name')
     parser.add_argument('--src', type=str, required=True,
                         help='input image')
     parser.add_argument('--weight', type=str, required=True,
                         help='a path of trained weight file')
-    parser.add_argument('--quantization', type=str, default='none', choices=['none', 'qat', 'ptq'],
+    parser.add_argument('--quantization', type=str, default='none', 
+                        choices=['none', 'qat', 'ptq'],
                         help='load quantized model or float32 model')
-    parser.add_argument('--measure_latency', action='store_true',
-                        help='print latency time')
-    parser.add_argument('--num_classes', type=int, default=33,
+    parser.add_argument('--num_classes', type=int, default=28,
                         help='the number of classes')
     return parser
 
