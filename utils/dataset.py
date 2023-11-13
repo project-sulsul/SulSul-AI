@@ -50,14 +50,14 @@ class Padding(object):
 
 def load_dataloader(
     path: str,
-    normalization: bool=True,
-    img_size: int = 224,
+    normalization: bool=False,
+    img_size: int=224,
     fill_color: Tuple[int, int, int]=(0, 0, 0),
-    subset: str = 'train',
+    subset: str='train',
     num_workers: int=8,
     batch_size: int=32,
     shuffle: bool=True,
-    drop_last: bool = True,
+    drop_last: bool=True,
 ):
     assert subset in ('train', 'valid', 'test')
 
