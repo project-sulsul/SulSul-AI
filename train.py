@@ -306,7 +306,7 @@ def get_args_parser():
                         help='momentum constant for SGD momentum and Adam (beta1)')
     parser.add_argument('--optimizer', default='momentum', type=str,
                         help='set optimizer (sgd momentum and adam)')
-    parser.add_argument('--num_classes', default=18, type=int,
+    parser.add_argument('--num_classes', default=28, type=int,
                         help='class number of dataset')
     parser.add_argument('--lr_scheduling', action='store_true',
                         help='apply learning rate scheduler')
