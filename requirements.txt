@@ -1,5 +1,6 @@
 matplotlib==3.6.2
 numpy==1.23.5
+scikit-learn==1.0.2
 nvidia-cublas-cu11==11.10.3.66
 nvidia-cuda-nvrtc-cu11==11.7.99
 nvidia-cuda-runtime-cu11==11.7.99
