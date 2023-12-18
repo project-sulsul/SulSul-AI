@@ -3,6 +3,7 @@
 ### Overview
 **Features**
 - [`Multi-Label Classification`](https://github.com/project-sulsul/SulSul-AI/blob/56bc18e75e52dcc455a434269ed7544db6551206/train.py#L142)
+
     <img src = "https://i.ytimg.com/vi/Epx2V3Kd3dE/maxresdefault.jpg" width=600>
 
 - [`Image Padding`](https://github.com/project-sulsul/SulSul-AI/blob/56bc18e75e52dcc455a434269ed7544db6551206/utils/dataset.py#L46)
