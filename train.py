@@ -46,16 +46,15 @@ def train_on_batch(
 
         outputs = model(images)
         loss = loss_func(outputs, labels)
-        output_index = torch.argmax(outputs, dim=1)
-        acc = (output_index == labels).sum() / len(outputs)
+        outputs = outputs > 0.5
+        acc = (outputs == labels).float().mean()
         
         loss.backward()
         optimizer.step()
 
-        if log_step > 0:
-            if (batch + 1) / log_step == 0:
-                logger(f'\n[Batch {batch+1}/{len(train_loader)}]'
-                       f'  train loss: {loss:.3f}  accuracy: {acc:.3f}')
+        if (batch + 1) / log_step == 0:
+            logger(f'\n[Batch {batch+1}/{len(train_loader)}]'
+                   f'  train loss: {loss:.3f} train accuracy: {acc:.3f}')
         
         batch_loss += loss.item()
         batch_acc += acc.item()
@@ -79,13 +78,12 @@ def valid_on_batch(
 
         outputs = model(images)
         loss = loss_func(outputs, labels)
-        output_index = torch.argmax(outputs, dim=1)
-        acc = (output_index == labels).sum() / len(outputs)
-
-        if log_step > 0:
-            if (batch + 1) / log_step == 0:
-                logger(f'\n[Batch {batch+1}/{len(valid_loader)}]'
-                       f'  valid loss: {loss:.3f}  accuracy: {acc:.3f}')
+        outputs = outputs > 0.5
+        acc = (outputs == labels).float().mean()
+        
+        if (batch + 1) / log_step == 0:
+            logger(f'\n[Batch {batch+1}/{len(valid_loader)}]'
+                   f'  valid loss: {loss:.3f} valid accuracy: {acc:.3f}')
 
         batch_loss += loss.item()
         batch_acc += acc.item()
@@ -119,7 +117,7 @@ def training(
 
     # quantization
     if quantization:
-        from .quantization.quantize import prepare_qat, fuse_modules
+        from quantization.quantize import prepare_qat, fuse_modules
 
         project_name += '_qat'
         model = fuse_modules(model, mode='train')
@@ -140,7 +138,8 @@ def training(
     logger.info('model loading ready.')
 
     # loss function
-    loss_func = nn.CrossEntropyLoss(weight=class_weight)
+    # loss_func = nn.CrossEntropyLoss(weight=class_weight)
+    loss_func = nn.MultiLabelSoftMarginLoss(weight=class_weight)
 
     # optimizer
     if optimizer_name == 'momentum':
@@ -209,7 +208,6 @@ def training(
             log_step=train_log_step,
         )
         loss_list.append(train_loss)
-        acc_list.append(train_acc)
         ####################################################
 
         #################### validating ####################
@@ -221,16 +219,13 @@ def training(
             log_step=valid_log_step,
         )
         val_loss_list.append(valid_loss)
-        val_acc_list.append(valid_acc)
         ####################################################
 
         logger.info(f'\n{"="*30} Epoch {epoch+1}/{epochs} {"="*30}'
                     f'\ntime: {(time.time() - epoch_time):.2f}s'
                     f'   lr = {optimizer.param_groups[0]["lr"]}')
-        logger.info(f'\ntrain average loss: {train_loss:.3f}'
-                    f'  accuracy: {train_acc:.3f}')
-        logger.info(f'\nvalid average loss: {valid_loss:.3f}'
-                    f'  accuracy: {valid_acc:.3f}')
+        logger.info(f'\ntrain average loss: {train_loss:.3f} accuracy: {train_acc:.3f}')
+        logger.info(f'\nvalid average loss: {valid_loss:.3f} accuracy: {valid_acc:.3f}')
         logger.info(f'\n{"="*80}')
 
         writer.add_scalar('lr', optimizer.param_groups[0]["lr"], epoch)
@@ -247,7 +242,7 @@ def training(
             cp(valid_loss, model, path)
 
         if early_stop:
-            es(valid_loss, model)    
+            es(valid_loss, model)
             if es.early_stop:
                 print('\n##########################\n'
                       '##### Early Stopping #####\n'
@@ -306,7 +301,7 @@ def get_args_parser():
                         help='momentum constant for SGD momentum and Adam (beta1)')
     parser.add_argument('--optimizer', default='momentum', type=str,
                         help='set optimizer (sgd momentum and adam)')
-    parser.add_argument('--num_classes', default=28, type=int,
+    parser.add_argument('--num_classes', default=18, type=int,
                         help='class number of dataset')
     parser.add_argument('--lr_scheduling', action='store_true',
                         help='apply learning rate scheduler')
@@ -330,7 +325,6 @@ def main(args):
 
     train_loader = load_dataloader(
         path=args.data_path,
-        normalization=args.normalization,
         img_size=args.img_size,
         subset='train',
         num_workers=args.num_workers,
@@ -339,7 +333,6 @@ def main(args):
 
     valid_loader = load_dataloader(
         path=args.data_path,
-        normalization=args.normalization,
         img_size=args.img_size,
         subset='valid',
         num_workers=args.num_workers,
