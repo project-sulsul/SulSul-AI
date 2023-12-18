@@ -281,7 +281,7 @@ class ResNet(nn.Module):
         return self._forward_impl(x)
 
 
-def resnet18(num_classes: int=28, pre_trained: bool=True, quantize: bool=False) -> ResNet:
+def resnet18(num_classes: int=33, pre_trained: bool=True, quantize: bool=False) -> ResNet:
     resnet18 = ResNet(
         block=BasicBlock, 
         layers=[2, 2, 2, 2], 
@@ -297,7 +297,7 @@ def resnet18(num_classes: int=28, pre_trained: bool=True, quantize: bool=False) 
     return resnet18
 
 
-def resnet50(num_classes: int=28, pre_trained: bool=True, quantize: bool=False) -> ResNet:
+def resnet50(num_classes: int=33, pre_trained: bool=True, quantize: bool=False) -> ResNet:
     resnet50 = ResNet(
         block=BottleNeck, 
         layers=[3, 4, 6, 3], 

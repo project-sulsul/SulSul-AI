@@ -8,7 +8,7 @@ from torch.quantization import QuantStub, DeQuantStub
 class ShuffleNetV2(nn.Module):
     def __init__(
         self,
-        num_classes=28,
+        num_classes=33,
         pre_trained=True,
         quantize=False,
     ):
