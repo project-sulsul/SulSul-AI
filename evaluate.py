@@ -1,9 +1,9 @@
 import os
 import argparse
 import time
+from sklearn.metrics import confusion_matrix, classification_report
 from tqdm.auto import tqdm
 from typing import *
-from sklearn.metrics import confusion_matrix, classification_report
 
 import torch
 import torch.nn as nn
@@ -18,15 +18,21 @@ from quantization.quantize import (
     print_size_of_model,
 )
 
-
-classes = {
-    0: '소고기', 1: '맥주', 2: '치킨', 3: '닭발', 4: '닭갈비',
-    5: '마른안주', 6: '두부김치', 7: '황도', 8: '계란말이', 9: '어묵탕',
-    10: '감자튀김', 11: '곱창', 12: '하이볼', 13: '화채', 14: '짬뽕',
-    15: '짜파게티', 16: '라면', 17: '양꼬치', 18: '나초', 19: '나가사키 짬뽕',
-    20: '피자', 21: '삼겹살', 22: '족발', 23: '육회', 24: '연어',
-    25: '회', 26: '새우튀김', 27: '소주',
+class_info = {
+    # foods
+    'beef': 0, 'chicken': 1, 'chicken_feet': 2, 'chicken_ribs': 3, 'dry_snacks': 4,
+    'dubu_kimchi': 5, 'ecliptic': 6, 'egg_roll': 7, 'fish_cake_soup': 8,
+    'french_fries': 9, 'gopchang': 10, 'hwachae': 11, 'jjambbong': 12,
+    'jjapageti': 13, 'korean_ramen': 14, 'lamb_skewers': 15, 'nacho': 16,
+    'nagasaki': 17, 'pizza': 18, 'pork_belly': 19, 'pork_feet': 20,
+    'raw_meat': 21, 'salmon': 22, 'sashimi': 23, 'shrimp_tempura': 24,
+    
+    # drinks
+    'beer': 25, 'cass': 26, 'chamisul_fresh': 27, 'chamisul_origin': 28,
+    'chum_churum': 29, 'highball': 30, 'hite': 31, 'jinro': 32, 'kelly': 33, 
+    'kloud': 34, 'ob': 35, 'saero': 36, 'soju': 37, 'tera': 38,
 }
+
 
 # score function
 def score_fn(label, pred):
@@ -37,8 +43,7 @@ def score_fn(label, pred):
     each_score = classification_report(
         label,
         pred,
-        target_names=list(classes.values()),
-    )
+        target_names=list(class_info.values()))
     print('\n\n### each score ###\n')
     print(each_score)
 
@@ -56,43 +61,36 @@ def test(
     image_list, label_list, output_list = [], [], []
     
     start = time.time()
-
     model.eval()
     model = model.to(device)
     batch_acc = 0
     with torch.no_grad():
         for batch, (images, labels) in tqdm(enumerate(test_loader), total=len(test_loader)):
             image_list.append(images)
-            label_list.append(labels)
+            label_list.append(labels.tolist())
 
             images = images.to(device)
             labels = labels.to(device)
 
             outputs = model(images)
-            output_index = torch.argmax(outputs, dim=1)
+            outputs = outputs > 0.5
+            acc = (outputs == labels).float().mean()
 
-            output_list.append(output_index.cpu())
-
-            acc = (output_index == labels).sum() / len(outputs)
             batch_acc += acc.item()
     
     print(f'{"="*20} Inference Time: {time.time()-start:.3f}s {"="*20}')    
-    
-    if project_name is not None and plot_result:
-        plot_results(image_list, label_list, output_list, project_name)
-    
     print(f'{"="*20} Test Average Accuracy {batch_acc/(batch+1)*100:.2f} {"="*20}')
-
+    score_fn(sum(label_list, []), sum(output_list, []))
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description='Training Model', add_help=False)
+    parser = argparse.ArgumentParser(description='Evaluating Model', add_help=False)
     parser.add_argument('--data_path', type=str, required=True,
                         help='data directory for training')
     parser.add_argument('--subset', type=str, default='valid',
                         help='dataset subset')
     parser.add_argument('--model_name', type=str, required=True,
-                        help='model name consisting of mobilenet, shufflenet, efficientnet, resnet18 and resnet50')
+                        help='model name consisting of shufflenet, resnet18 and resnet50')
     parser.add_argument('--weight', type=str, required=True,
                         help='load trained model')
     parser.add_argument('--img_size', type=int, default=224,
@@ -108,7 +106,7 @@ def get_args_parser():
     parser.add_argument('--quantization', type=str, default='none', choices=['none', 'qat', 'ptq'],
                         help='evaluate the performance of quantized model or float32 model when setting none')
     parser.add_argument('--plot_result', action='store_true',
-                        help='measure latency time')
+                        help='save the plotting result')
     parser.add_argument('--device', type=str, choices=['cuda', 'cpu'], default='cpu',
                         help='set device for inference')
     return parser
@@ -125,14 +123,14 @@ def main(args):
         num_workers=args.num_workers,
         batch_size=args.batch_size,
         drop_last=False,
-        shuffle=False,
+        shuffle=True,
     )
 
     # setting device
     device = torch.device(args.device)
 
     q = True if args.quantization != 'none' else False
-
+    
     # load model
     if args.model_name == 'shufflenet':
         from models.shufflenet import ShuffleNetV2
@@ -148,7 +146,7 @@ def main(args):
 
     else:
         raise ValueError(f'model name {args.model_name} does not exists.')
-
+    
     # quantization
     if args.quantization == 'ptq':
         model = ptq_serving(model=model, weight=args.weight)
@@ -157,8 +155,8 @@ def main(args):
         model = qat_serving(model=model, weight=args.weight)
 
     else: # 'none'
-        model.load_state_dict(torch.load(args.weight, map_location='cpu'))
-
+        model.load_state_dict(torch.load(args.weight))#, map_location='cpu'))
+    
     test(
         test_loader,
         device=device,
