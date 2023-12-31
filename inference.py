@@ -91,6 +91,10 @@ def main(args):
     elif args.model_name == 'resnet18':
         from models.resnet import resnet18
         model = resnet18(num_classes=args.num_classes, pre_trained=False, quantize=q)
+    
+    elif args.model_name == 'resnet34':
+        from models.resnet import resnet34
+        model = resnet34(num_classes=args.num_classes, pre_trained=False, quantize=q)
         
     elif args.model_name == 'resnet50':
         from models.resnet import resnet50
