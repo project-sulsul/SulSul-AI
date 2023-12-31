@@ -90,7 +90,7 @@ def get_args_parser():
     parser.add_argument('--subset', type=str, default='valid',
                         help='dataset subset')
     parser.add_argument('--model_name', type=str, required=True,
-                        help='model name consisting of shufflenet, resnet18 and resnet50')
+                        help='model name consisting of shufflenet, resnet18, resnet34 and resnet50')
     parser.add_argument('--weight', type=str, required=True,
                         help='load trained model')
     parser.add_argument('--img_size', type=int, default=224,
@@ -99,7 +99,7 @@ def get_args_parser():
                         help='number of workers in cpu')
     parser.add_argument('--batch_size', default=32, type=int,
                         help='batch Size for training model')
-    parser.add_argument('--num_classes', type=int, default=28,
+    parser.add_argument('--num_classes', type=int, default=39,
                         help='class number of dataset')
     parser.add_argument('--project_name', type=str, default='prj',
                         help='create new folder named project name')
@@ -140,6 +140,10 @@ def main(args):
         from models.resnet import resnet18
         model = resnet18(num_classes=args.num_classes, pre_trained=False, quantize=q)
 
+    elif args.model_name == 'resnet34':
+        from models.resnet import resnet34
+        model = resnet34(num_classes=args.num_classes, pre_trained=False, quantize=q)
+
     elif args.model_name == 'resnet50':
         from models.resnet import resnet50
         model = resnet50(num_classes=args.num_classes, pre_trained=False, quantize=q)
@@ -155,7 +159,7 @@ def main(args):
         model = qat_serving(model=model, weight=args.weight)
 
     else: # 'none'
-        model.load_state_dict(torch.load(args.weight))#, map_location='cpu'))
+        model.load_state_dict(torch.load(args.weight))
     
     test(
         test_loader,
