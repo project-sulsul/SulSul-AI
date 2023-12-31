@@ -277,7 +277,7 @@ def get_args_parser():
     
     # model parameters
     parser.add_argument('--model', type=str, default='shufflenet',
-                        choices=['shufflenet', 'resnet18', 'resnet50'],
+                        choices=['shufflenet', 'resnet18', 'resnet34', 'resnet50'],
                         help='classification model name')
     parser.add_argument('--pretrained', action='store_true',
                         help='load pretrained model')
@@ -351,6 +351,11 @@ def main(args):
         from models.resnet import resnet18
         model = resnet18(num_classes=args.num_classes, pre_trained=args.pretrained, quantize=q)
         logger.info('model : ResNet18!')
+
+    elif args.model == 'resnet34':
+        from models.resnet import resnet34
+        model = resnet34(num_classes=args.num_classes, pre_trained=args.pretrained, quantiza=q)
+        logger.info('model : ResNet34!')
 
     elif args.model == 'resnet50':
         from models.resnet import resnet50
