@@ -118,18 +118,22 @@ def print_size_of_model(model, label=''):
     return size
 
 
-def comparison_size_of_models(model_name: str, num_classes: int=33):
+def comparison_size_of_models(model_name: str, num_classes: int=39):
     if model_name == 'shufflenet':
         from ..models.shufflenet import ShuffleNetV2
-        float_model = ShuffleNetV2(num_classes=33, pre_trained=False, quantize=True)
+        float_model = ShuffleNetV2(num_classes=num_classes, pre_trained=False, quantize=True)
         
     elif model_name == 'resnet18':
         from ..models.resnet import resnet18
-        float_model = resnet18(num_classes=33, quantize=True)
+        float_model = resnet18(num_classes=num_classes, quantize=True)
+    
+    elif model_name == 'resnet34':
+        from ..models.resnet import resnet34
+        float_model = resnet34(num_classes=num_classes, quantize=True)
         
     elif model_name == 'resnet50':
         from ..models.resnet import resnet50
-        float_model = resnet50(num_classes=33, quantize=True)
+        float_model = resnet50(num_classes=num_classes, quantize=True)
 
     else:
         raise ValueError(f'model name {model_name} does not exists.')
